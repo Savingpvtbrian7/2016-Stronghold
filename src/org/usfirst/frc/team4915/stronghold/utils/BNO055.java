@@ -2,8 +2,6 @@ package org.usfirst.frc.team4915.stronghold.utils;
 
 import java.util.TimerTask;
 
-import javax.xml.bind.DatatypeConverter;
-
 import edu.wpi.first.wpilibj.I2C;
 import edu.wpi.first.wpilibj.Timer;
 

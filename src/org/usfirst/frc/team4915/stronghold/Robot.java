@@ -8,6 +8,7 @@ import org.usfirst.frc.team4915.stronghold.subsystems.GearShift;
 import org.usfirst.frc.team4915.stronghold.subsystems.IntakeLauncher;
 import org.usfirst.frc.team4915.stronghold.subsystems.Scaler;
 import org.usfirst.frc.team4915.stronghold.utils.BNO055;
+
 import edu.wpi.first.wpilibj.IterativeRobot;
 import edu.wpi.first.wpilibj.Joystick;
 import edu.wpi.first.wpilibj.command.Command;
@@ -59,19 +60,12 @@ public class Robot extends IterativeRobot {
             System.out.println("ModuleManager initialized: IntakeLauncher");
             System.out.println(intakeLauncher.getSetPoint());
         }
-        if (ModuleManager.GYRO_MODULE_ON) {
-            RobotMap.gyro.initGyro();
-            // Sensitivity in VEX Yaw Rate Gyro data sheet: 0.0011
-            RobotMap.gyro.setSensitivity(0.0011);
-            RobotMap.gyro.calibrate();
-            SmartDashboard.putString("Module Manager", "initialize gyro");
-            System.out.println("ModuleManager initialize gyro: " + RobotMap.gyro.getAngle());
-            RobotMap.gyro.reset();
-        }
+
         if (ModuleManager.SCALING_MODULE_ON) {
             scaler = new Scaler();
         }
         if (ModuleManager.IMU_MODULE_ON) {
+        	// imu is initialized in RobotMap.init()
             BNO055.CalData calData = RobotMap.imu.getCalibration();
             SmartDashboard.putBoolean("IMU present", RobotMap.imu.isSensorPresent());
             SmartDashboard.putBoolean("IMU initialized", RobotMap.imu.isInitialized());
@@ -95,9 +89,11 @@ public class Robot extends IterativeRobot {
     public void autonomousInit() {
 
         // schedule the autonomous command
+        //autonomousCommand = new MoveStraightPositionModeCommand(100, 0.5);
+    
         autonomousCommand = new AutoCommand1((Autonomous.Type) oi.barrierType.getSelected(), (Autonomous.Strat) oi.strategy.getSelected(),
-                (Autonomous.Position) oi.startingFieldPosition.getSelected());
-
+                      (Autonomous.Position) oi.startingFieldPosition.getSelected());
+        
         if (this.autonomousCommand != null) {
             this.autonomousCommand.start();
         }
@@ -117,6 +113,11 @@ public class Robot extends IterativeRobot {
         // teleop starts running. If you want the autonomous to
         // continue until interrupted by another command, remove
         // this line or comment it out.
+      //set speed
+        
+       // RobotMap.rightBackMotor.changeControlMode(CANTalon.TalonControlMode.Speed);
+       // RobotMap.leftBackMotor.changeControlMode(CANTalon.TalonControlMode.Speed);
+        
         if (this.autonomousCommand != null) {
             this.autonomousCommand.cancel();
         }
@@ -143,6 +144,8 @@ public class Robot extends IterativeRobot {
             SmartDashboard.putNumber("Aimer Set Point: ", intakeLauncher.getSetPoint());
             SmartDashboard.putBoolean("Top Limit Switch: ", intakeLauncher.isLauncherAtTop());
             SmartDashboard.putBoolean("Bottom Limit Switch: ", intakeLauncher.isLauncherAtBottom());
+            SmartDashboard.putNumber("Intake Motor Left Voltage", intakeLauncher.getIntakeMotorLeft().getBusVoltage());
+            SmartDashboard.putBoolean("Launch Wheels Ready to Launch: ", intakeLauncher.isLaunchReady());
         }
     }
 

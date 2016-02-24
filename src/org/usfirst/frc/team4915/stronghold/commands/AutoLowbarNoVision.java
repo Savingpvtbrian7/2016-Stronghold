@@ -1,10 +1,11 @@
 package org.usfirst.frc.team4915.stronghold.commands;
 
-import edu.wpi.first.wpilibj.command.CommandGroup;
 import org.usfirst.frc.team4915.stronghold.commands.DriveTrain.AutoRotateDegrees;
 import org.usfirst.frc.team4915.stronghold.commands.DriveTrain.MoveStraightPositionModeCommand;
 import org.usfirst.frc.team4915.stronghold.commands.IntakeLauncher.LauncherGoToAngleCommand;
-import org.usfirst.frc.team4915.stronghold.commands.IntakeLauncher.SpinLaunchWheelsOutCommand;
+import org.usfirst.frc.team4915.stronghold.commands.IntakeLauncher.SpinIntakeWheelsOutCommand;
+
+import edu.wpi.first.wpilibj.command.CommandGroup;
 
 /**
  *
@@ -33,14 +34,14 @@ public class AutoLowbarNoVision extends CommandGroup {
         // arm.
 
         // moves under the low bar
-        addSequential(new MoveStraightPositionModeCommand(168));
+        addSequential(new MoveStraightPositionModeCommand(168, 0.5));
         // not exact degree number (rotates robot to get ready to shoot)
         addSequential(new AutoRotateDegrees(false, 30));
         // volts to degrees...
         // just put in a random number and gets the aimer ready to shoot
         addSequential(new LauncherGoToAngleCommand(520));
         // launches ball
-        addSequential(new SpinLaunchWheelsOutCommand());
+        addSequential(new SpinIntakeWheelsOutCommand());
 
     }
 }
