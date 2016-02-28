@@ -1,6 +1,13 @@
 
 package org.usfirst.frc.team4915.stronghold;
 
+import edu.wpi.first.wpilibj.IterativeRobot;
+import edu.wpi.first.wpilibj.command.Command;
+import edu.wpi.first.wpilibj.command.Scheduler;
+import edu.wpi.first.wpilibj.livewindow.LiveWindow;
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj.Timer;
 import org.usfirst.frc.team4915.stronghold.commands.AutoCommand1;
 import org.usfirst.frc.team4915.stronghold.subsystems.Autonomous;
 import org.usfirst.frc.team4915.stronghold.subsystems.DriveTrain;
@@ -8,14 +15,6 @@ import org.usfirst.frc.team4915.stronghold.subsystems.GearShift;
 import org.usfirst.frc.team4915.stronghold.subsystems.IntakeLauncher;
 import org.usfirst.frc.team4915.stronghold.subsystems.Scaler;
 import org.usfirst.frc.team4915.stronghold.utils.BNO055;
-
-import edu.wpi.first.wpilibj.IterativeRobot;
-import edu.wpi.first.wpilibj.Joystick;
-import edu.wpi.first.wpilibj.command.Command;
-import edu.wpi.first.wpilibj.command.Scheduler;
-import edu.wpi.first.wpilibj.livewindow.LiveWindow;
-import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
-import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 
 /**
  * The VM is configured to automatically run this class, and to call the
@@ -31,9 +30,11 @@ public class Robot extends IterativeRobot {
     public static OI oi;
     public static GearShift gearShift;
     public static Scaler scaler;
-
+    
     Command autonomousCommand;
     SendableChooser autonomousProgramChooser;
+
+    private volatile double lastTime;
 
     /**
      * This function is run when the robot is first started up and should be
@@ -46,37 +47,52 @@ public class Robot extends IterativeRobot {
         // 2. conditionally create the modules
         if (ModuleManager.DRIVE_MODULE_ON) {
             driveTrain = new DriveTrain();
-            gearShift = new GearShift();
-            System.out.println("ModuleManager initialized: DriveTrain");
+            SmartDashboard.putString("Drivetrain Module", "initialized");
         }
+        else
+            SmartDashboard.putString("Drivetrain Module", "disabled");
+
         if (ModuleManager.GEARSHIFT_MODULE_ON) {
-            SmartDashboard.putString("Gear shift", "Initialized");
             gearShift = new GearShift();
+            SmartDashboard.putString("Shift Module", "initialized");
         }
+        else
+        	SmartDashboard.putString("Shift Module", "disabled");
+        
         if (ModuleManager.INTAKELAUNCHER_MODULE_ON) {
-            intakeLauncher = new IntakeLauncher();
-            SmartDashboard.putNumber("Launcher Set Point: ", intakeLauncher.aimMotor.getPosition());
-            SmartDashboard.putString("Module Manager", "IntakeLauncher Initialized");
-            System.out.println("ModuleManager initialized: IntakeLauncher");
-            System.out.println(intakeLauncher.getSetPoint());
+        	/* to prevent module-manager-madness (M-cubed), we
+        	 * place try/catch block for exceptions thrown on account of
+        	 * missing hardware.
+        	 */
+        	try {
+        		intakeLauncher = new IntakeLauncher();
+                SmartDashboard.putString("IntakeLauncher Module", "initialized");
+        	}
+        	catch (Throwable e) {
+                System.out.println("Disabling IntakeLauncher at runtime");
+                SmartDashboard.putString("IntakeLauncher Module", "ERROR");
+                ModuleManager.INTAKELAUNCHER_MODULE_ON = false;
+        	}
         }
+        else
+            SmartDashboard.putString("IntakeLauncher Module", "disabled");
 
         if (ModuleManager.SCALING_MODULE_ON) {
             scaler = new Scaler();
-        }
+            SmartDashboard.putString("Scaling Module", "initialized");
+       }
+        else
+            SmartDashboard.putString("Scaling Module", "disabled");
+        
         if (ModuleManager.IMU_MODULE_ON) {
         	// imu is initialized in RobotMap.init()
-            BNO055.CalData calData = RobotMap.imu.getCalibration();
+            SmartDashboard.putString("IMU Module", "initialized");
             SmartDashboard.putBoolean("IMU present", RobotMap.imu.isSensorPresent());
-            SmartDashboard.putBoolean("IMU initialized", RobotMap.imu.isInitialized());
-            SmartDashboard.putNumber("IMU calibration status", 
-                    (calData.sys * 1000 + 
-                    calData.accel * 100 + 
-                    calData.gyro * 10 + 
-                    calData.mag)); 
-            // Calibration values range from 0-3, 
-            // Right to left: mag, gyro, accel
+            updateIMUStatus();
         }
+        else
+            SmartDashboard.putString("IMU Module", "disabled");
+
         oi = new OI(); // 3. Construct OI after subsystems created
     }
 
@@ -89,7 +105,7 @@ public class Robot extends IterativeRobot {
     public void autonomousInit() {
 
         // schedule the autonomous command
-        //autonomousCommand = new MoveStraightPositionModeCommand(100, 0.5);
+        //autonomousCommand = new MoveStraightPositionModeCommand(30, 0.5);
     
         autonomousCommand = new AutoCommand1((Autonomous.Type) oi.barrierType.getSelected(), (Autonomous.Strat) oi.strategy.getSelected(),
                       (Autonomous.Position) oi.startingFieldPosition.getSelected());
@@ -105,6 +121,7 @@ public class Robot extends IterativeRobot {
     @Override
     public void autonomousPeriodic() {
         Scheduler.getInstance().run();
+        periodicStatusUpdate();
     }
 
     @Override
@@ -138,15 +155,7 @@ public class Robot extends IterativeRobot {
     @Override
     public void teleopPeriodic() {
         Scheduler.getInstance().run();
-        if (ModuleManager.INTAKELAUNCHER_MODULE_ON) {
-            SmartDashboard.putNumber("aimMotor Potentiometer position = ", intakeLauncher.getPosition());
-            SmartDashboard.putNumber("Aimer JoystickY Position: ", Robot.oi.aimStick.getAxis((Joystick.AxisType.kY)));
-            SmartDashboard.putNumber("Aimer Set Point: ", intakeLauncher.getSetPoint());
-            SmartDashboard.putBoolean("Top Limit Switch: ", intakeLauncher.isLauncherAtTop());
-            SmartDashboard.putBoolean("Bottom Limit Switch: ", intakeLauncher.isLauncherAtBottom());
-            SmartDashboard.putNumber("Intake Motor Left Voltage", intakeLauncher.getIntakeMotorLeft().getBusVoltage());
-            SmartDashboard.putBoolean("Launch Wheels Ready to Launch: ", intakeLauncher.isLaunchReady());
-        }
+        periodicStatusUpdate();
     }
 
     /**
@@ -155,13 +164,47 @@ public class Robot extends IterativeRobot {
     @Override
     public void testPeriodic() {
         LiveWindow.run();
-        if (ModuleManager.INTAKELAUNCHER_MODULE_ON) {
-            SmartDashboard.putNumber("aimMotor Potentiometer position = ", intakeLauncher.getPosition());
-            SmartDashboard.putNumber("Aimer JoystickY Position: ", Robot.oi.aimStick.getAxis((Joystick.AxisType.kY)));
-            SmartDashboard.putNumber("Aimer Set Point: ", intakeLauncher.getSetPoint());
-            SmartDashboard.putBoolean("Top Limit Switch: ", intakeLauncher.isLauncherAtTop());
-            SmartDashboard.putBoolean("Bottom Limit Switch: ", intakeLauncher.isLauncherAtBottom());
-            SmartDashboard.putBoolean("Boulder Limit Switch ", Robot.intakeLauncher.boulderLoaded());
+        periodicStatusUpdate();
+     }
+    
+    public void periodicStatusUpdate() {
+        double currentTime = Timer.getFPGATimestamp(); // seconds
+        // only update the smart dashboard 1 per second to prevent
+        // network congestion.
+        if(currentTime - this.lastTime > 1.) {
+        	updateIMUStatus();
+        	updateLauncherStatus();
+        	updateDrivetrainStatus();
+        	this.lastTime = currentTime;
         }
     }
+
+	public void updateIMUStatus() {
+ 	   if (ModuleManager.IMU_MODULE_ON) {
+            BNO055.CalData calData = RobotMap.imu.getCalibration();
+            SmartDashboard.putNumber("IMU heading", RobotMap.imu.getNormalizedHeading());
+            // SmartDashboard.putNumber("IMU dist to origin", RobotMap.imu.getDistFromOrigin());
+            SmartDashboard.putNumber("IMU calibration", 
+                                 (1000 + (calData.accel * 100) + calData.gyro *10 + calData.mag)); 
+                                 //Calibration values range from 0-3, Right to left: mag, gyro, accel
+ 	   }
+	}
+	
+	public void updateLauncherStatus() {
+        if (ModuleManager.INTAKELAUNCHER_MODULE_ON) {
+            SmartDashboard.putNumber("Launcher Set Point: ", intakeLauncher.aimMotor.getPosition());
+            SmartDashboard.putNumber("aimMotor Potentiometer: ", intakeLauncher.getPosition());
+	        SmartDashboard.putBoolean("Top Limit Switch: ", intakeLauncher.isLauncherAtTop());
+	        SmartDashboard.putBoolean("Bottom Limit Switch: ", intakeLauncher.isLauncherAtBottom());
+	        SmartDashboard.putNumber("Intake Motor Left Voltage: ", intakeLauncher.getIntakeMotorLeft().getBusVoltage());
+	        SmartDashboard.putBoolean("Launch Wheels Ready to Launch: ", intakeLauncher.isLaunchReady());
+	        SmartDashboard.putBoolean("Boulder Limit Switch: ", intakeLauncher.boulderSwitch.get()); 
+        }
+	}
+	
+	public void updateDrivetrainStatus() {
+        if (ModuleManager.DRIVE_MODULE_ON) {
+        	
+        }
+	}
 }
