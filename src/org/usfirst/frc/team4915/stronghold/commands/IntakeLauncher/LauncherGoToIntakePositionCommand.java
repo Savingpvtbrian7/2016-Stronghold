@@ -4,32 +4,29 @@ import org.usfirst.frc.team4915.stronghold.Robot;
 
 import edu.wpi.first.wpilibj.command.Command;
 
-public class AimLauncherCommand extends Command {
+public class LauncherGoToIntakePositionCommand extends Command {
 
-    public AimLauncherCommand() {
-        requires(Robot.intakeLauncher);
+    public LauncherGoToIntakePositionCommand() {
+
     }
 
     protected void initialize() {
-        
+        Robot.intakeLauncher.launcherSetIntakePosition();
     }
 
     protected void execute() {
-        Robot.intakeLauncher.aimLauncher();
-        System.out.println("Aiming Launcher");
-        
+
     }
 
     protected boolean isFinished() {
-        return false;
+        return true;
     }
 
     protected void end() {
-        
+    
     }
 
     protected void interrupted() {
-        System.out.println("Aimer Interrupted");
-        
+    
     }
 }

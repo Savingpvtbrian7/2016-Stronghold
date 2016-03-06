@@ -19,9 +19,8 @@ public class Autonomous extends Subsystem {
         MOAT,
         RAMPARTS,
         ROUGH_TERRAIN,
-        ROCK_WALL,
-        CHEVAL_DE_FRISE
-
+        ROCK_WALL
+        
     }
 
     public static enum Strat {
@@ -29,7 +28,6 @@ public class Autonomous extends Subsystem {
         DRIVE_ACROSS,
         DRIVE_SHOOT_VISION,
         DRIVE_SHOOT_NO_VISION
-
     }
 
     public static enum Position {
@@ -38,6 +36,5 @@ public class Autonomous extends Subsystem {
         THREE,
         FOUR,
         FIVE
-
     }
 }

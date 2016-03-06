@@ -1,17 +1,14 @@
 package org.usfirst.frc.team4915.stronghold.commands;
 
+import edu.wpi.first.wpilibj.command.CommandGroup;
 import org.usfirst.frc.team4915.stronghold.ModuleManager;
-import org.usfirst.frc.team4915.stronghold.Robot;
 import org.usfirst.frc.team4915.stronghold.commands.DriveTrain.ArcadeDrive;
 import org.usfirst.frc.team4915.stronghold.commands.DriveTrain.AutoRotateDegrees;
-import org.usfirst.frc.team4915.stronghold.commands.DriveTrain.MoveStraightPositionModeCommand;
-import org.usfirst.frc.team4915.stronghold.commands.IntakeLauncher.LauncherGoToAngleCommand;
 import org.usfirst.frc.team4915.stronghold.commands.IntakeLauncher.AimLauncherCommand;
-import org.usfirst.frc.team4915.stronghold.commands.IntakeLauncher.LaunchBallCommandGroup;
+import org.usfirst.frc.team4915.stronghold.commands.IntakeLauncher.AutoLaunchCommand;
+import org.usfirst.frc.team4915.stronghold.commands.IntakeLauncher.LauncherGoToAngleCommand;
 import org.usfirst.frc.team4915.stronghold.commands.vision.AutoAimControlCommand;
 import org.usfirst.frc.team4915.stronghold.subsystems.Autonomous;
-
-import edu.wpi.first.wpilibj.command.CommandGroup;
 
 public class AutoCommand1 extends CommandGroup {
 
@@ -26,17 +23,18 @@ public class AutoCommand1 extends CommandGroup {
         System.out.println("Angle: " + position + "Field Position " + position + "strategy " + strat + "Obstacle " + type);
 
         if (ModuleManager.INTAKELAUNCHER_MODULE_ON) {
-            Robot.intakeLauncher.launcherSetNeutralPosition(); // placeholder
+          //  Robot.intakeLauncher.launcherSetNeutralPosition(); // placeholder
                                                                // for setting
                                                                // the launcher
                                                                // to neutral
                                                                // driving
                                                                // position
         }
+
     	switch (strat) {
 		case DRIVE_SHOOT_VISION: // sets us up to use vision to shoot a high
 									// goal.
-			addSequential(new MoveStraightPositionModeCommand(getDistance(type)));
+			addSequential(new AutoDriveStraight(getDistance(type)));
 			addSequential(new AutoRotateDegrees(getLeft(position), getDegrees(position)));
 			if (ModuleManager.VISION_MODULE_ON) {
 				addSequential(new AutoAimControlCommand(true, true));
@@ -44,23 +42,48 @@ public class AutoCommand1 extends CommandGroup {
 				addParallel(new AimLauncherCommand());
 			}
 			break;
-		case DRIVE_SHOOT_NO_VISION:
-			addSequential(new MoveStraightPositionModeCommand(getDistance(type)));
+		case DRIVE_SHOOT_NO_VISION: 
+			System.out.println("Starting Move Straight");
+			addSequential(new AutoDriveStraight(getDistance(type)));
 			addSequential(new AutoRotateDegrees(getLeft(position), getDegrees(position)));
 			if (ModuleManager.INTAKELAUNCHER_MODULE_ON) {
-				addSequential(new LauncherGoToAngleCommand(25));
-				addSequential(new LaunchBallCommandGroup());
+				addParallel(new AimLauncherCommand());
+				addSequential(new LauncherGoToAngleCommand(getAimAngle(position)));
+				addSequential(new AutoLaunchCommand());
 			}
 			break;
 		case DRIVE_ACROSS:
-			addSequential(new MoveStraightPositionModeCommand(getDistance(type)));
+			addSequential(new AutoDriveStraight(getDistance(type)));
 			break;
 		default:
 			break;
 		}
 	}
-   
-
+    public static double getAimAngle(Autonomous.Position position) {
+        System.out.println(position);
+        double angle = 0;
+        switch (position) {
+            case ONE:
+                angle = 40;
+                break;
+            case TWO:
+                angle = 40;
+                break;
+            case THREE:
+            	angle = 30;
+                break;
+            case FOUR:
+                angle = 40;
+                break;
+            case FIVE:
+                angle = 40;
+                break;
+            default:
+                angle = 40;
+        }
+        return angle;
+    }
+    
     public static boolean getLeft(Autonomous.Position position) {
         System.out.println(position);
         boolean left = true;
@@ -74,7 +97,7 @@ public class AutoCommand1 extends CommandGroup {
             case THREE:
                 break;
             case FOUR:
-                left = true;
+                left = false;
                 break;
             case FIVE:
                 left = true;
@@ -85,24 +108,24 @@ public class AutoCommand1 extends CommandGroup {
         return left;
     }
 
-    public static int getDegrees(Autonomous.Position position) {
-        int degrees;
+    public static double getDegrees(Autonomous.Position position) {
+        double degrees;
         System.out.println(position);
         switch (position) {
-            case ONE:
-                degrees = 45;
+            case ONE://low bar
+                degrees = 80.4;
                 break;
             case TWO:
-                degrees = 15;
+                degrees = 41.08;
                 break;
             case THREE:
-                degrees = 15;
+                degrees = 11.95;
                 break;
             case FOUR:
-                degrees = 15;
+                degrees = 13.12;
                 break;
             case FIVE:
-                degrees = 15;
+                degrees = 57.75;
                 break;
             default:
                 degrees = 0;
@@ -131,30 +154,30 @@ public class AutoCommand1 extends CommandGroup {
     }
 
     public static int getDistance(Autonomous.Type type) {
-        int distance;
+        int distance; //in inches
         System.out.println(type);
         switch (type) {
             case LOWBAR:
-                distance = 20;
+                distance = 120; 
                 break;
             case MOAT:
-                distance = 15;
+                distance = 120; 
                 break;
             case RAMPARTS:
-                distance = 35;
+                distance = 120; 
                 break;
             case ROUGH_TERRAIN:
-                distance = 40;
+                distance = 90; 
                 break;
             case ROCK_WALL:
-                distance = 5;
+                distance = 120; 
                 break;
             default:
-                distance = 0;
+                distance = 25;
         }
         return distance;
     }
-
+ 
     // Make this return true when this Command no longer needs to run execute()
     protected boolean isFinished() {
         return false;

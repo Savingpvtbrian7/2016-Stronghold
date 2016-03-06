@@ -1,9 +1,7 @@
 package org.usfirst.frc.team4915.stronghold.subsystems;
-
 import java.util.Arrays;
 import java.util.List;
 
-import org.usfirst.frc.team4915.stronghold.ModuleManager;
 import org.usfirst.frc.team4915.stronghold.Robot;
 import org.usfirst.frc.team4915.stronghold.RobotMap;
 import org.usfirst.frc.team4915.stronghold.commands.DriveTrain.ArcadeDrive;
@@ -13,127 +11,106 @@ import edu.wpi.first.wpilibj.Joystick;
 import edu.wpi.first.wpilibj.RobotDrive;
 import edu.wpi.first.wpilibj.RobotDrive.MotorType;
 import edu.wpi.first.wpilibj.command.Subsystem;
-import edu.wpi.first.wpilibj.interfaces.Gyro;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 
 public class DriveTrain extends Subsystem {
 
-    // Constructor for SpeedControllers: frontLeftMotor, rearLeftMotor,
-    // frontRightMotor, rearRightMotor
+    public final static double DEFAULT_SPEED_MAX_OUTPUT = 100.0;         // 100.0 == ~13 ft/sec interpolated from observations
+    public final static double MAXIMUM_SPEED_MAX_OUTPUT = 150.0;         // 150.0 == ~20 ft/sec interpolated from observations
+
     public static RobotDrive robotDrive =
-            new RobotDrive(RobotMap.leftBackMotor, RobotMap.rightBackMotor);
-    public double joystickThrottle;
+            new RobotDrive(RobotMap.leftMasterMotor, RobotMap.rightMasterMotor);
 
-    // For Gyro
-    public static Gyro gyro = RobotMap.gyro;
-    public double deltaGyro = 0;
-    public double gyroHeading = 0;
-    public double startingAngle = 0;
-
-    // motors
-    public static List<CANTalon> motors =
-            Arrays.asList(RobotMap.leftFrontMotor, RobotMap.leftBackMotor, RobotMap.rightFrontMotor, RobotMap.rightBackMotor);
-
+    private double maxSpeed = 0;
     @Override
     public void initDefaultCommand() {
         // Set the default command for a subsystem here.
-        System.out.println("INFO: Initializing the ArcadeDrive");
-
+        System.out.println("ArcadeDrive getControlModes: " +
+        			RobotMap.leftMasterMotor.getControlMode() + "  " +
+        			RobotMap.rightMasterMotor.getControlMode());
         setDefaultCommand(new ArcadeDrive());
-        /*
-         * FIXME: robotDrive static field access instead of:
-         * robotDrive.setSafetyEnabled(true); do (remove this):
-         * robotDrive.setSafetyEnabled(true)
-         */
+
         robotDrive.setSafetyEnabled(true);
-        // inverting motors
-        robotDrive.setInvertedMotor(MotorType.kRearLeft, true);
-
-        robotDrive.setInvertedMotor(MotorType.kRearRight, true);
         robotDrive.stopMotor();
-        // checking to see the encoder values
-        // this can be removed later. Used to debug
-        if (motors.size() > 0) {
-            for (int i = 0; i < motors.size(); i++) {
-            }
+    }
+
+    public void arcadeDrive(double driveYstick, double driveXstick) {
+        System.out.println("Arcade drive y: " + driveYstick + ", x " + driveXstick);
+        robotDrive.arcadeDrive(driveYstick, driveXstick);
+        System.out.println("Arcade drive get speed = " + RobotMap.leftMasterMotor.getSpeed());
+    }
+
+    public void resetEncoders(){
+        RobotMap.leftMasterMotor.setEncPosition(0);
+        RobotMap.rightMasterMotor.setEncPosition(0);
+    }
+
+    /*
+     * Methods to get/set maximum top speed for our robot
+     */
+    public double getMaxOutput() {
+
+        if (maxSpeed == 0) {   /* not initialized, yet */
+            return DEFAULT_SPEED_MAX_OUTPUT;
+        }
+        else {
+            return maxSpeed;
         }
     }
 
-    public double modifyThrottle() {
-        // 255 is the max number on the throttle
-        double modifiedThrottle = 0.40 * (-1 * Robot.oi.getJoystickDrive().getAxis(Joystick.AxisType.kThrottle)) + 0.60;
-        if (modifiedThrottle != this.joystickThrottle) {
-            SmartDashboard.putNumber("Throttle: ", modifiedThrottle);
-        }
-        setMaxOutput(modifiedThrottle);
-        return modifiedThrottle;
-    }
 
-    private void setMaxOutput(double topSpeed) {
-        robotDrive.setMaxOutput(topSpeed);
-    }
+    public void setMaxOutput(double maxOutput) {
 
-    public void arcadeDrive(Joystick stick) {
+        if (maxOutput > MAXIMUM_SPEED_MAX_OUTPUT) {
+            maxSpeed = MAXIMUM_SPEED_MAX_OUTPUT;
+        }
+        else {
+            maxSpeed = maxOutput;
+        }
 
-        if (ModuleManager.GYRO_MODULE_ON) {
-            Robot.driveTrain.trackGyro();
-        }
-        robotDrive.arcadeDrive(stick);
-        // checking to see the encoder values
-        // this can be removed later. Used to debug
-        if (motors.size() > 0) {
-            for (int i = 0; i < motors.size(); i++) {
-                SmartDashboard.putNumber("Encoder Value for Motor" + i, motors.get(i).getEncPosition());
-            }
-        }
+        robotDrive.setMaxOutput(maxSpeed);
     }
 
     public void stop() {
         robotDrive.stopMotor();
     }
 
-    // Methods for Gyro
-    public double trackGyro() {
-        this.gyroHeading = -(gyro.getAngle()) + this.startingAngle;
-        SmartDashboard.putNumber("Gyro heading", this.gyroHeading);
-        SmartDashboard.putData("Gyro", RobotMap.gyro);
-        return this.gyroHeading;
-    }
-
     public void driveStraight(double speed) {
-
-        robotDrive.arcadeDrive(speed, 0);
+        RobotMap.leftMasterMotor.set(speed);
+        RobotMap.rightMasterMotor.set(-speed);
     }
 
-    public void turn(boolean left) {
-        if (ModuleManager.GYRO_MODULE_ON) {
-            trackGyro();
-        }
+    public void turn(boolean left, double speed) {
         if (left) {
-            robotDrive.arcadeDrive(0, -.7);
+            RobotMap.leftMasterMotor.set(-speed);
+            RobotMap.rightMasterMotor.set(-speed);
         } else {
-            robotDrive.arcadeDrive(0, .7);
+            System.out.println("Turn right: " + speed);
+            RobotMap.leftMasterMotor.set(speed);
+            RobotMap.rightMasterMotor.set(speed);
         }
     }
 
     // autoturn is just a gentler version of (joystick) turn.
     public void autoturn(boolean left) {
-        if (ModuleManager.GYRO_MODULE_ON) {
-            trackGyro();
-        }
         if (left) {
-            robotDrive.arcadeDrive(0, -.2);
+            robotDrive.arcadeDrive(0, -.55);
         } else {
-            robotDrive.arcadeDrive(0, .2);
+            robotDrive.arcadeDrive(0, .55);
         }
     }
 
-    public void turnToward(double heading) {
-        double deltaHeading = RobotMap.imu.getHeading() - heading;
-        if (Math.abs(deltaHeading) < 1.0)
+    public void turnToward(double target) {
+        double heading = RobotMap.imu.getNormalizedHeading();
+        double delta =  target - heading;
+        System.out.println("target: " + target +
+                           " heading: " + heading +
+                           " delta: " + delta);
+        SmartDashboard.putNumber("Vision Delta", delta);
+        if (Math.abs(delta) < 5.0) {
             this.stop();
-        else
-            this.autoturn(deltaHeading < 0.0);
+        } else {
+            this.autoturn(delta > 0.0 /*turn left*/ );
+        }
     }
-
 }

@@ -4,8 +4,6 @@ import java.util.List;
 
 import org.usfirst.frc.team4915.stronghold.ModuleManager;
 import org.usfirst.frc.team4915.stronghold.Robot;
-import org.usfirst.frc.team4915.stronghold.RobotMap;
-import org.usfirst.frc.team4915.stronghold.utils.BNO055;
 import org.usfirst.frc.team4915.stronghold.vision.robot.VisionState;
 
 import edu.wpi.first.wpilibj.CANTalon;
@@ -15,13 +13,10 @@ import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 
 public class ArcadeDrive extends Command {
 
-    public Joystick joystickDrive;
+    private double scaledThrottle;
     private double joystickX;
     private double joystickY;
-    public static List<CANTalon> motors = Robot.driveTrain.motors;
-    public double[] oldVelocity = new double[3];
-    public double[] distTraveled = new double[3];
-    public double distFromOrigin;
+    private static final double MIN_THROTTLE_SCALE = 0.5;
 
     public ArcadeDrive() {
         // Use requires() here to declare subsystem dependencies
@@ -31,59 +26,84 @@ public class ArcadeDrive extends Command {
     // Called just before this Command runs the first time
     @Override
     protected void initialize() {
-        for (int i = 0; i < motors.size(); i++) {
-            motors.get(i).setEncPosition(0);
-        }
+      Robot.driveTrain.setMaxOutput(Robot.driveTrain.getMaxOutput());
+
     }
 
     // Called repeatedly when this Command is scheduled to run
     @Override
     protected void execute() {
-        this.joystickDrive = Robot.oi.getJoystickDrive();
-        this.joystickX = this.joystickDrive.getAxis(Joystick.AxisType.kX);
-        this.joystickY = this.joystickDrive.getAxis(Joystick.AxisType.kY);
+        Joystick joystickDrive= Robot.oi.getJoystickDrive();
+        this.joystickX = joystickDrive.getAxis(Joystick.AxisType.kX) * -1;
+        this.joystickY = joystickDrive.getAxis(Joystick.AxisType.kY) *-1;
 
-        if (ModuleManager.GYRO_MODULE_ON) {
-            Robot.driveTrain.trackGyro();
+        this.scaledThrottle = scaleThrottle(joystickDrive.getAxis(Joystick.AxisType.kThrottle));
+        VisionState vs = null;
+        if (ModuleManager.VISION_MODULE_ON) {
+            vs = VisionState.getInstance();
         }
 
-        VisionState vs = VisionState.getInstance();
-        double heading;
-        if (ModuleManager.IMU_MODULE_ON) {
-            heading = RobotMap.imu.getHeading();
-            SmartDashboard.putNumber("IMU heading", (int) (heading + .5));
-            vs.updateIMUHeading(heading);
-        } else {
-            heading = 0.0;
-        }
+        if (vs != null && vs.wantsControl()) {
+        	if(!vs.DriveLockedOnTarget) {
+	            if (vs.RelativeTargetingMode == 1) {
 
-        Robot.driveTrain.joystickThrottle = Robot.driveTrain.modifyThrottle();
-
-        if (vs.wantsControl()) {
-            if (vs.RelativeTargetingMode) {
-                if (Math.abs(vs.TargetX) < 3) {
-                    Robot.driveTrain.stop(); // close enough
-                } else {
-                    Robot.driveTrain.autoturn(vs.TargetX < 0);
-                }
-            } else {
-                /* absolute autotargeting */
-                Robot.driveTrain.turnToward(vs.TargetX);
+	                if (Math.abs(vs.TargetX) < 3) {
+	                    Robot.driveTrain.stop(); // close enough
+	                }
+	                else {
+	                    Robot.driveTrain.autoturn(vs.TargetX < 0);
+	                }
+	            } else {
+	                /* absolute autotargeting */
+	                Robot.driveTrain.turnToward(vs.TargetX);
+	            }
+        	}
+            else {
+                // wait for launcher to shoot and exit auto mode
+                // or toggle AutoAim
+                Robot.driveTrain.stop(); // needed to keep driveTrain alive
             }
-        } else {
+        }
+        else {
+
             if ((Math.abs(this.joystickX) < 0.075) &&
                     (Math.abs(this.joystickY) < 0.075)) {
                 Robot.driveTrain.stop();
-            } else {
-                Robot.driveTrain.arcadeDrive(this.joystickDrive);
             }
-            SmartDashboard.putNumber("Drive joystick X position", this.joystickX);
-            SmartDashboard.putNumber("Drive joystick Y position", this.joystickY);
-
+            else {
+                Robot.driveTrain.arcadeDrive(joystickY * scaledThrottle, joystickX * scaledThrottle);
+            }
         }
-
     }
 
+    /*
+     * Returns a scaled value between MIN_THROTTLE_SCALE and 1.0
+     * MIN_THROTTLE_SCALE must be set to the lowest useful scale value through experimentation
+     * Scale the joystick values by throttle before passing to the driveTrain
+     *     +1=bottom position; -1=top position
+     */
+    private double scaleThrottle(double raw_throttle_value) {
+        /**
+         * Throttle returns a double in the range of -1 to 1. We would like to change that to a range of MIN_THROTTLE_SCALE to 1.
+         * First, multiply the raw throttle value by -1 to reverse it (makes "up" maximum (1), and "down" minimum (-1))
+         * Then, add 1 to make the range 0-2 rather than -1 to +1
+         * Then multiply by ((1-MIN_THROTTLE_SCALE)/2) to change the range to 0-(1-MIN_THROTTLE_SCALE)
+         * Finally add MIN_THROTTLE_SCALE to change the range to MIN_THROTTLE_SCALE to 1
+         *
+         * Check the results are in the range of MIN_THROTTLE_SCALE to 1, and clip it in case the math went horribly wrong.
+         */
+        double scale = ((raw_throttle_value * -1) + 1) * ((1-MIN_THROTTLE_SCALE) / 2) + MIN_THROTTLE_SCALE;
+
+        if (scale < MIN_THROTTLE_SCALE) {
+            // Somehow our math was wrong. Our value was too low, so force it to the minimum
+            scale = MIN_THROTTLE_SCALE;
+        }
+        else if (scale > 1) {
+            // Somehow our math was wrong. Our value was too high, so force it to the maximum
+            scale = 1.0;
+        }
+        return scale;
+    }
     // Make this return true when this Command no longer needs to run execute()
     @Override
     protected boolean isFinished() {

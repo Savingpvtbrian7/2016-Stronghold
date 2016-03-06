@@ -27,14 +27,17 @@ import common
 class App:
     def __init__(self):
         self.args = self.parseArgs()
+        self.paused = False
+        self.frame = None
+        self.visWin = 'img'
         if self.args.daemonize:
             with daemon.DaemonContext():
-                self.go()
+                self.init()
         else:
-            self.go()
+            self.init()
 
-    def go(self):
-        # args is argparser.Namespace: an object whose members are 
+    def init(self):
+        # args is argparser.Namespace: an object whose members are
         # accessed as:  self.args.cannedimages
 
         self.robotCnx = robotCnx.RobotCnx(self.args.fakerobot)
@@ -53,8 +56,8 @@ class App:
         self.pending = deque()
         self.threadedMode = True
         self.update = False
-        self.latency = common.StatValue()   
-        self.frameT = common.StatValue() 
+        self.latency = common.StatValue()
+        self.frameT = common.StatValue()
         self.lastFrameTime = common.clock()
         self.lastStashTime = 0
         self.stashFilename = "/var/tmp/imgServer.home/currentImage.jpg"
@@ -94,15 +97,15 @@ class App:
             'threshold':         [75, 0, 0, 0, 0, 0],
             'huerange*valrange': [55, 100, 255, 255, 0, 0], # works for g LED
             'canny':             [10, 200, 0, 0, 0, 0],
-            'simpleblob':        [75, 150, 20, 40**2, 0, 0], 
+            'simpleblob':        [75, 150, 20, 40**2, 0, 0],
                           # minThresh
                           # maxThresh
                           # thresStep
                           # minSize (maxsize is 'large')
-            'houghlines':        [2, 5, 10, 30, 2, 0], 
+            'houghlines':        [2, 5, 10, 30, 2, 0],
                           # rho is distance resolution in pixels
                           # theta is angle in degress (larger -> more lines)
-                          # threshold is measured in 'votes', higher -> fewer 
+                          # threshold is measured in 'votes', higher -> fewer
                           # minLineLength
                           # maxLineGap
             'contours':          [1, 0, 0, -1, 1, 0],
@@ -240,31 +243,26 @@ class App:
             if not vsrc:
                 exit(1)
             else:
-                ret1 = vsrc.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 1280)
-                ret2 = vsrc.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 720)
-                print(ret1, ret2)
-                if 1:
-                    w = vsrc.get(cv2.cv.CV_CAP_PROP_FRAME_WIDTH)
-                    h = vsrc.get(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT)
-                    print("video res: %d %d" % (w,h))
+                ret1 = vsrc.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                ret2 = vsrc.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                w = vsrc.get(cv2.CAP_PROP_FRAME_WIDTH)
+                h = vsrc.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                print("video res: %d %d" % (w,h))
         else:
             vsrc = None
 
         self.update = False
         while True:
-            while len(self.pending) > 0 and self.pending[0].ready():
-                frame,t0,keypoints,lines,contours = self.pending.popleft().get()
-                self.latency.update(common.clock() - t0)
-                self.robotCnx.SetFPS(int(1/self.frameT.value))
 
-                self.drawStr(frame, (20, 20), 
-                    "latency       : %.1f ms" % (self.latency.value*1000))
-                self.drawStr(frame, (20, 40), 
-                    "frame interval: %.1f ms" % (self.frameT.value*1000))
-                self.showImg(frame, keypoints, lines, contours)
+            while len(self.pending) > 0 and self.pending[0].ready():
+                # pull frames processed in other thread first
+                self.frame,t0,keypoints,lines,contours = \
+                                        self.pending.popleft().get()
+                self.latency.update(common.clock() - t0)
+                self.postProcessFrame(t0, keypoints,lines,contours)
 
             if vsrc:
-                # Here we have a video source... Capture the image in the 
+                # Here we have a video source... Capture the image in the
                 # main thread, process it in other threads.
                 if len(self.pending) < self.threadn:
                     # we have threads available to perform work for us
@@ -272,12 +270,19 @@ class App:
                     t = common.clock()
                     self.frameT.update(t - self.lastFrameTime)
                     self.lastFrameTime = t
-                    # pass a copy of the new frame to another thread for 
-                    # processing this alows us to get back to the 
-                    # time-consuming task of capturing the next video frame.
-                    task = self.pool.apply_async(processFrameCB, 
+                    if 1:
+                        # pass a copy of the new frame to another thread for
+                        # processing this alows us to get back to the
+                        # time-consuming task of capturing the next video frame.
+                        task = self.pool.apply_async(processFrameCB,
                                             (self, self.mainImg.copy(), t))
-                    self.pending.append(task)
+                        self.pending.append(task)
+                    else:
+                        # or just process in this thread
+                        (self.frame, t0, keypts, lines, contours) = \
+                                self.processFrame(self.mainImg.copy(),
+                                                        common.clock())
+                        self.postProcessFrame(t0, keypts, lines, contours)
 
                 done,self.update,self.cmode,self.index,self.values,msg = \
                     self.checkKey(1, self.cmode, self.index, self.values)
@@ -288,8 +293,8 @@ class App:
                 if done:
                     break
             else:
-                # Here we don't have a video source, rather rely on 'canned' 
-                #  images. Thus, we don't use multiple threads... just do it 
+                # Here we don't have a video source, rather rely on 'canned'
+                #  images. Thus, we don't use multiple threads... just do it
                 #  all right here.
                 if self.index < 0:
                     # index < 0 signals user's intent to go bkd in framelist
@@ -314,21 +319,11 @@ class App:
                         self.putNotice(base)
 
                     self.mainImg = cv2.imread(fn, cv2.IMREAD_ANYCOLOR)
-                    (img, t0, keypts, lines, contours) = self.processFrame(
-                                                        self.mainImg.copy(), 
+                    (self.frame, t0, keypts, lines, contours) = \
+                                self.processFrame(self.mainImg.copy(),
                                                         common.clock())
-                    self.frameT.update(common.clock() - t0)
-                    self.robotCnx.SetFPS(int(1 / self.frameT.value))
+                    self.postProcessFrame(t0, keypts, lines, contours, base)
 
-                    if not self.args.nodisplay:
-                        if self.cmode == 'rgb':
-                            str = "%s     (%.2f ms)" % \
-                                    (base,self.frameT.value*1000)
-                        else:
-                            str = "%s[%s] (%.2f ms)" % \
-                                    (base,self.cmode,self.frameT.value*1000)
-                        self.drawStr(img, (20, 20), str)
-                        self.showImg(img, keypts, lines, contours)
 
                     self.lastFn = fn
 
@@ -352,13 +347,13 @@ class App:
         #   debugv:  display, fakerobot, video
         parser = argparse.ArgumentParser()
         parser.add_argument("-c", "--cannedimages",
-                help="use canned images instead of video", 
+                help="use canned images instead of video",
                 action='store_true')
         parser.add_argument("-n", "--nodisplay",
                 help="disable display of images to screen",
                 action='store_true')
         parser.add_argument("-f", "--fakerobot",
-                help="connect to fake robot on localhost", 
+                help="connect to fake robot on localhost",
                 action='store_true')
         parser.add_argument("-a", "--algorithm",
                 default=0,
@@ -413,11 +408,11 @@ class App:
                 hsv = cv2.cvtColor(frame, mode[0])
                 if cmode == 'h':
                     if 0:
-                        if mode[0] == cv2.COLOR_BGR2HSV: 
+                        if mode[0] == cv2.COLOR_BGR2HSV:
                             hsv[:,:,1] = 255 # s = 1
                             hsv[:,:,2] = 128 # v = .5
                         else:
-                            hsv[:,:,1] = 128 # l = .5 
+                            hsv[:,:,1] = 128 # l = .5
                             hsv[:,:,2] = 255 # s = 1
                         frame = cv2.cvtColor(hsv, mode[1])
                     else:
@@ -427,12 +422,12 @@ class App:
                         #frame = frame * v
                 elif cmode == 's':
                     # extract the s as grayscale
-                    if mode[0] == cv2.COLOR_BGR2HSV: 
+                    if mode[0] == cv2.COLOR_BGR2HSV:
                         h,frame,v = cv2.split(hsv)
                     else:
                         h,l,frame = cv2.split(hsv)
                 elif cmode == 'v':
-                    if mode[0] == cv2.COLOR_BGR2HSV: 
+                    if mode[0] == cv2.COLOR_BGR2HSV:
                         h,s,frame = cv2.split(hsv)
                     else:
                         h,frame,s = cv2.split(hsv)
@@ -449,17 +444,17 @@ class App:
                     thresh = cv2.THRESH_BINARY
                 else:
                     thresh = cv2.THRESH_BINARY_INV
-                frame = cv2.adaptiveThreshold(gray, 
+                frame = cv2.adaptiveThreshold(gray,
                                             200, # value to draw
                                             cv2.ADAPTIVE_THRESH_MEAN_C,
                                             thresh,
-                                            5, 
+                                            5,
                                             values[0])
             elif cmode == 'threshold':
                 frame = self.simpleThreshold(frame, values)
             elif cmode == 'huerange*valrange':
                 frame = self.hvRange(frame)
-            elif cmode == 'canny': 
+            elif cmode == 'canny':
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 v1 = values[0]*200
                 v2 = v1 + values[1]
@@ -473,7 +468,7 @@ class App:
                         bp.blobColor = values[4]  # 0 or 255  (?)
                     else:
                         bp.filterByColor = False
-                        bp.blobColor = 0 
+                        bp.blobColor = 0
 
                     # Change thresholds
                     bp.minThreshold = values[0]  # 50
@@ -483,7 +478,7 @@ class App:
                     # Filter by Area.
                     bp.filterByArea = True
                     bp.minArea = values[3]       # 500
-                    bp.maxArea = (640 * 480) / 5   
+                    bp.maxArea = (640 * 480) / 5
 
                     # Filter by Circularity
                     bp.filterByCircularity = False
@@ -496,8 +491,8 @@ class App:
                     # Filter by Inertia
                     bp.filterByInertia = False
                     bp.minInertiaRatio = 0.01
-                    
-                    detector = cv2.SimpleBlobDetector(bp)
+
+                    detector = cv2.SimpleBlobDetector_create(bp)
                     self.algostate["blobdetector"] = detector
                 else:
                     detector = self.algostate["blobdetector"]
@@ -518,7 +513,7 @@ class App:
                         self.LUT[i] = 255 * ((i/255.0) ** gamma)
                     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                     frame = cv2.LUT(gray, self.LUT)
-   
+
                 keypoints = detector.detect(frame) # we'll draw them
                 keypoints = self.robotCnx.NewKeypoints(keypoints)
             elif cmode == "houghlines":
@@ -532,7 +527,7 @@ class App:
                 threshold = max(values[2], 1) # votes needed to accept a line
                 minlen = values[3]
                 maxgap = values[4]
-                lines = cv2.HoughLinesP(bwf, 
+                lines = cv2.HoughLinesP(bwf,
                                         rho,  # distance res of accum in pixels
                                         theta,
                                         threshold,
@@ -549,12 +544,13 @@ class App:
             elif cmode == 'ORB':
                 if not "ORB" in self.algostate or self.update:
                     sf = max(1, min(2, 1. + values[1]/255.)) # [1->2]
-                    self.algostate["ORB"] = cv2.ORB( nfeatures=values[0],
+                    self.algostate["ORB"] = cv2.ORB_create(
+                                                nfeatures=values[0],
                                                 scaleFactor=sf,
                                                 nlevels=values[2],
                                                 patchSize=values[3],
                                                 edgeThreshold=values[3])
-                                            # could add: 
+                                            # could add:
                                             #   WTA_K: 2
                                             #   scoreType ORB_HARRIS_SCORE
                                             #  patchSize ~= edgeThreshold
@@ -562,22 +558,30 @@ class App:
                 orb = self.algostate["ORB"]
                 #keypoints,descrs = orb.detectAndCompute(frame, None)
                 #gray = self.simpleThreshold(frame)
-                gray = self.hvRange(frame)
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 keypoints = orb.detect(gray, None)
                 self.putNotice('ORB features: %d' % len(keypoints))
-                frame = gray
-            elif cmode == 'dance0':
-            	t = common.clock()*2*math.pi/5
-            	x = math.sin(t)*values[0]/27*320 + 320 #[0, 640]s/
-            	kp = cv2.KeyPoint(x, 240, 10)
-            	keypoints = self.robotCnx.NewKeypoints([kp])
             elif cmode == 'dance1':
+                period = 15.0 # seconds
+                t = common.clock()*2*math.pi/period
+                wav = math.sin(t)
+                if 0:
+                    #ww sin wav
+                	x = 22.0 * wav
+                	y = (1 + wav) * 45 - 5  #(-5->40 degrees)
+                else:
+                    # square wave
+                    x = 6.0 if (wav < 0.) else -6.0
+                    y = 35.0 if (wav < 0.) else 5.0
+                kp = cv2.KeyPoint(x, y, 10)
+            	keypoints = self.robotCnx.NewTarget(kp)
+            elif cmode == 'dance2':
             	t = common.clock()*2*math.pi/15
-            	x = 22 * math.sin(t) + 320
+            	x = 22 * math.sin(t)
             	#[0, 640]s/
-            	y = 60 * (1+math.sin(t)) + 240
+            	y = 60 * (1+math.sin(t))
             	# math.sin(t)*values[0]/27*320 + 240 #[0, 480]s/
-            	kp = cv2.KeyPoint(x, y, 10)
+            	kp = cv2.KeyPoint(0, y, 10)
             	keypoints = self.robotCnx.NewKeypoints([kp])
             elif cmode == 'gamma':
                 # Since our inputs are normalized to [0, 1]
@@ -588,10 +592,30 @@ class App:
             	for i in range(0, 256):
             		self.LUT[i] = 255 * ((i/255.0) ** gamma)
             	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            	frame = cv2.LUT(gray, self.LUT)           		
+            	frame = cv2.LUT(gray, self.LUT)
             else:
                 print("unknown cmode: " + cmode)
         return frame, t0, keypoints, lines, contours
+
+    def postProcessFrame(self, t0, kpts, lines, contours,base=None):
+        self.frameT.update(common.clock() - t0)
+        self.robotCnx.SetFPS(int(1 / self.frameT.value))
+        if not self.args.nodisplay:
+            if base:
+                if self.cmode == 'rgb':
+                    str = "%s     (%.2f ms)" % \
+                                (base,self.frameT.value*1000)
+                else:
+                    str = "%s[%s] (%.2f ms)" % \
+                            (base,self.cmode,self.frameT.value*1000)
+            else:
+                if not self.latency.value:
+                    self.latency.value = 0
+                str = "latency       : %02.2f ms, frame interval %02.2f" % \
+                    (self.latency.value*1000, self.frameT.value*1000)
+                
+            self.drawStr(self.frame, (20, 20), str)
+            self.showImg(self.frame, kpts, lines, contours)
 
     def showImg(self, frame, keypoints, lines, contours):
         if self.args.nodisplay and self.args.stashinterval == 0:
@@ -600,13 +624,13 @@ class App:
         if keypoints:
             frame = cv2.drawKeypoints(frame, [keypoints[0]],
                                np.array([]),
-                               (0,0,255), 
-                               cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS) 
+                               (0,0,255),
+                               0) #cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
             if len(keypoints) > 1:
                 frame = cv2.drawKeypoints(frame, keypoints[1:],
                                np.array([]),
-                               (255,205,25), 
-                               cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS) 
+                               (255,205,25),
+                               0) #cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
         if lines != None:
             for l in lines[0]:
                 cv2.line(frame, (l[0], l[1]), (l[2], l[3]), (20,255,255))
@@ -620,14 +644,14 @@ class App:
                 values[3] = -1
                 cindex = -1
             cv2.drawContours(frame, contours0, cindex,
-                                (128,255,255), 
-                                thickness=1, 
+                                (128,255,255),
+                                thickness=1,
                                 lineType=cv2.CV_AA,
-                                hierarchy=hier, 
+                                hierarchy=hier,
                                 maxLevel=maxlevel)
-                
+
         if not self.args.nodisplay:
-           cv2.imshow("img", frame)
+            cv2.imshow(self.visWin, frame)
 
         if self.args.stashinterval != 0 and \
             (common.clock() - self.lastStashTime) > self.args.stashinterval:
@@ -645,7 +669,7 @@ class App:
         return self, self.zeros
 
     def setCmodeValues(self, cmode, values):
-        self.cmodeValueCache[cmode] = values 
+        self.cmodeValueCache[cmode] = values
 
     def checkKey(self, waitMS, cmode, index, values):
         done=False
@@ -695,9 +719,9 @@ class App:
         sys.stdout.flush()
 
     def drawStr(self, img, pos, str):
-        cv2.putText(img, str, pos, cv2.FONT_HERSHEY_PLAIN, 1, 
+        cv2.putText(img, str, pos, cv2.FONT_HERSHEY_PLAIN, 1,
                     (0, 0, 0), thickness=2)  # colors arb bgr
-        cv2.putText(img, str, pos, cv2.FONT_HERSHEY_PLAIN, 1, 
+        cv2.putText(img, str, pos, cv2.FONT_HERSHEY_PLAIN, 1,
                     (244, 100, 100))  # colors arb bgr
 
 def processFrameCB(o, frame, t0):
@@ -705,4 +729,3 @@ def processFrameCB(o, frame, t0):
 
 if __name__ == '__main__':
     App().Run()
-
